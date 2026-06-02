@@ -178,4 +178,10 @@ class MultiHeadLatentAttentionWrapper(PluggableLayer):
             output_shape=(hidden_states.shape[0], self.num_heads * self.v_head_dim),
         )
 
-        return self.o_proj(attn_out)[0]
+       # [ROCm] Bug fix: ROCMAiterMLASparseBackend returns attn_out as
+       # 3D [num_tokens, num_heads, v_head_dim] instead of expected
+       # 2D [num_tokens, num_heads * v_head_dim]. Flatten before o_proj.
+       # Validated: GLM-5.1-FP8 on 8x MI300X (gfx942), TP=8 - PASS
+       if attn_out.dim() == 3:
+           attn_out = attn_out.reshape(attn_out.size(0), -1)
+       return self.o_proj(attn_out)[0]
