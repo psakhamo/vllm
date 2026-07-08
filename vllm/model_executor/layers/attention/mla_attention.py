@@ -636,7 +636,16 @@ class MLAAttention(nn.Module, AttentionLayerBase):
         quant_col_major: bool | None = None,
         quant_tma_aligned: bool | None = None,
     ) -> torch.Tensor:
-        assert output is not None, "Output tensor must be provided."
+        # [Bugfix] vLLM profiling run (_dummy_run) calls forward_impl
+        # without an output buffer — it only needs shape info, not values.
+        # The assertion is too strict for this case. Allocate a zero buffer
+        # when output is None. During real inference, callers always provide
+        # a buffer so this path is never taken outside of startup profiling.
+        if output is None:
+               output = torch.zeros(
+                   (q.shape[0], self.num_heads, self.v_head_dim),
+                   dtype=q.dtype,
+                   device=q.device,)
 
         quant_key = _detect_output_quant_key(
             output, output_scale, output_block_scale, self.num_heads * self.v_head_dim
