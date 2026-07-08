@@ -6295,10 +6295,18 @@ class GPUModelRunner(
                         for i, output in enumerate(dummy_encoder_outputs):
                             self.encoder_cache[f"tmp_{i}"] = output
 
-        # Add `is_profile` here to pre-allocate communication buffers
+        # [ROCm] When fused_qkv_a_proj uses sequence-parallel mode
+        # (disable_tp=True), it all-gathers hidden_states across TP ranks,
+        # producing query tensors with tp_size * local_tokens (e.g., 65536
+        # for TP=8 with 8192 local tokens). Surrounding tensors (positions,
+        # k, residual) remain at local token count, causing shape mismatches
+        # and GPU OOM in MoE layers during the profiling pass.
+        # Affected models: GLM-5 (GlmMoeDsaForCausalLM), DeepSeek-V3/R1
+        # at any TP > 1 with MLA + DSA attention.
+        _profile_tokens = min(self.max_num_tokens, 64)
         hidden_states, last_hidden_states = self._dummy_run(
-            self.max_num_tokens, is_profile=True
-        )
+               _profile_tokens, is_profile=True)
+
         if get_pp_group().is_last_rank:
             if self.is_pooling_model:
                 output = self._dummy_pooler_run(hidden_states)
